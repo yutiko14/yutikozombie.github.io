@@ -12,6 +12,8 @@
   #hud{position:fixed;top:10px;left:12px;color:#cfe8cf;font-size:14px;text-shadow:0 1px 2px #000;pointer-events:none;line-height:1.5;display:none}
   #hud .bonus{color:#ff6b6b;font-weight:bold;display:none;}
   #hud .difficulty{color:#ffaa00;font-weight:bold;display:none;}
+  #hud .ult-ready { color: #ffcc00; font-weight: bold; text-shadow: 0 0 10px #ffcc00; animation: pulse 1s infinite; }
+  @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
   
   #boss-hud {
     position:fixed; top:10px; left:50%; transform:translateX(-50%);
@@ -96,6 +98,7 @@
   <div>🌊 Волна: <span id="wave">1</span></div>
   <div>⚡ Сложность: <span id="difficulty">1</span></div>
   <div>🎯 До бонуса: <span id="nextBonus">20</span></div>
+  <div id="ultHud">💥 Ульта: <span id="ultCharge">0</span> / 67</div>
   <div class="bonus" id="bonusHud">🔥 РАЖ: <span id="bonusTimer">0</span>с</div>
   <div class="difficulty" id="diffHud" style="color:#ffaa00; display:none;">⚠️ СЛОЖНОСТЬ ПОВЫШЕНА!</div>
 </div>
@@ -118,6 +121,8 @@
     bonusHud: document.getElementById('bonusHud'),
     bonusTimer: document.getElementById('bonusTimer'),
     diffHud: document.getElementById('diffHud'),
+    ultHud: document.getElementById('ultHud'),
+    ultCharge: document.getElementById('ultCharge'),
     menu: document.getElementById('menu'),
     gameover: document.getElementById('gameover'),
     hud: document.getElementById('hud'),
@@ -152,6 +157,7 @@
     playMedkit() { if(!this.isInitialized)return; const t=this.ctx.currentTime; [500,700,1000].forEach((f,i)=>{const osc=this.ctx.createOscillator();const gain=this.ctx.createGain();osc.type='sine';osc.frequency.setValueAtTime(f,t+i*0.08);gain.gain.setValueAtTime(0.2,t+i*0.08);gain.gain.exponentialRampToValueAtTime(0.01,t+i*0.08+0.15);osc.connect(gain);gain.connect(this.masterGain);osc.start(t+i*0.08);osc.stop(t+i*0.08+0.15);}); },
     playPerk() { if(!this.isInitialized)return; const t=this.ctx.currentTime; const osc=this.ctx.createOscillator(); const gain=this.ctx.createGain(); osc.type='triangle'; osc.frequency.setValueAtTime(300,t); osc.frequency.exponentialRampToValueAtTime(900,t+0.2); gain.gain.setValueAtTime(0.2,t); gain.gain.exponentialRampToValueAtTime(0.01,t+0.2); osc.connect(gain); gain.connect(this.masterGain); osc.start(t); osc.stop(t+0.2); },
     playLightning() { if(!this.isInitialized)return; const t=this.ctx.currentTime; const bufferSize=this.ctx.sampleRate*0.3; const buffer=this.ctx.createBuffer(1,bufferSize,this.ctx.sampleRate); const data=buffer.getChannelData(0); for(let i=0;i<bufferSize;i++)data[i]=Math.random()*2-1; const noise=this.ctx.createBufferSource(); noise.buffer=buffer; const filter=this.ctx.createBiquadFilter(); filter.type='highpass'; filter.frequency.value=1000; const gain=this.ctx.createGain(); gain.gain.setValueAtTime(0.3,t); gain.gain.exponentialRampToValueAtTime(0.01,t+0.3); noise.connect(filter); filter.connect(gain); gain.connect(this.masterGain); noise.start(t); },
+    playUlt() { if(!this.isInitialized)return; const t=this.ctx.currentTime; [200,400,600,1000].forEach((f,i)=>{const osc=this.ctx.createOscillator();const gain=this.ctx.createGain();osc.type='sawtooth';osc.frequency.setValueAtTime(f,t+i*0.05);gain.gain.setValueAtTime(0.2,t+i*0.05);gain.gain.exponentialRampToValueAtTime(0.01,t+i*0.05+0.2);osc.connect(gain);gain.connect(this.masterGain);osc.start(t+i*0.05);osc.stop(t+i*0.05+0.2);}); },
     startMusic() { if(!this.isInitialized)return; this.stopMusic(); this.musicInterval=setInterval(()=>{if(!this.ctx||this.ctx.state==='suspended')return;const t=this.ctx.currentTime;const osc=this.ctx.createOscillator();const gain=this.ctx.createGain();osc.type='triangle';const notes=[55,55,65,55];const note=notes[Math.floor(t*2)%notes.length];osc.frequency.setValueAtTime(note,t);gain.gain.setValueAtTime(0,t);gain.gain.linearRampToValueAtTime(0.2,t+0.05);gain.gain.exponentialRampToValueAtTime(0.01,t+0.4);osc.connect(gain);gain.connect(this.musicGain);osc.start(t);osc.stop(t+0.4);},500); },
     stopMusic() { if(this.musicInterval){clearInterval(this.musicInterval);this.musicInterval=null;} },
     resume() { if(this.ctx&&this.ctx.state==='suspended')this.ctx.resume(); }
@@ -160,7 +166,7 @@
   // --- GAME STATE ---
   const state = {
     running: false, over: false,
-    hp: 100, maxHp: 100, regen: 0.1, // Добавлен реген
+    hp: 100, maxHp: 100, regen: 0.1,
     kills: 0, wave: 1, difficulty: 1,
     waveTimer: 0, spawnTimer: 0,
     itemTimer: 2, medkitTimer: 5, perkTimer: 5,
@@ -173,7 +179,14 @@
     frenzyTime: 0, frenzyActive: false,
     buffs: { speed: 0, armor: 0, damage: 0, firerate: 0 },
     screenFlash: 0, cameraShake: 0, t: 0,
-    nextBonusKill: 20, nextDiffKill: 75,
+    nextBonusKill: 20, nextDiffKill: 150,
+    
+    // УЛЬТА
+    ultCharge: 0,
+    ultMax: 67,
+    ultActive: false,
+    ultTimer: 0,
+    ultSpikeTimer: 0,
   };
 
   function startGame() {
@@ -193,8 +206,13 @@
     state.frenzyTime = 0; state.frenzyActive = false;
     state.buffs = { speed: 0, armor: 0, damage: 0, firerate: 0 };
     state.screenFlash = 0; state.cameraShake = 0;
-    state.nextBonusKill = 20; state.nextDiffKill = 75;
+    state.nextBonusKill = 20; state.nextDiffKill = 150;
     state.keys = {};
+    
+    state.ultCharge = 0;
+    state.ultActive = false;
+    state.ultTimer = 0;
+    state.ultSpikeTimer = 0;
 
     ui.menu.classList.add('hidden'); ui.gameover.classList.add('hidden');
     ui.hud.style.display = 'block'; ui.bonusHud.style.display = 'none';
@@ -210,7 +228,19 @@
     ui.wave.textContent = state.wave;
     ui.difficulty.textContent = state.difficulty;
     ui.nextBonus.textContent = Math.max(0, state.nextBonusKill - state.kills);
+    ui.ultCharge.textContent = state.ultCharge;
     
+    if (state.ultCharge >= state.ultMax && !state.ultActive) {
+      ui.ultHud.className = 'ult-ready';
+      ui.ultHud.innerHTML = `💥 УЛЬТА ГОТОВА [3]`;
+    } else if (state.ultActive) {
+      ui.ultHud.className = 'ult-ready';
+      ui.ultHud.innerHTML = `💥 УЛЬТА АКТИВНА!`;
+    } else {
+      ui.ultHud.className = '';
+      ui.ultHud.innerHTML = `💥 Ульта: <span id="ultCharge">${state.ultCharge}</span> / ${state.ultMax}`;
+    }
+
     if (state.frenzyActive) {
       ui.bonusHud.style.display = 'block';
       ui.bonusTimer.textContent = Math.ceil(state.frenzyTime);
@@ -222,9 +252,15 @@
   // --- Input ---
   window.addEventListener('keydown', e => {
     const code = e.code;
-    if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'KeyR', 'Space'].includes(code)) e.preventDefault();
+    if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'KeyR', 'Space', 'Digit3', 'Numpad3'].includes(code)) e.preventDefault();
     state.keys[code] = true;
+    
     if (code === 'KeyR' && state.running) startGame();
+    if ((code === 'Digit3' || code === 'Numpad3') && state.running && !state.over) {
+      if (state.ultCharge >= state.ultMax && !state.ultActive) {
+        activateUlt();
+      }
+    }
   });
   window.addEventListener('keyup', e => { state.keys[e.code] = false; });
   window.addEventListener('blur', () => { state.keys = {}; state.mouse.down = false; });
@@ -291,7 +327,6 @@
     AudioEngine.playLevelUp(); state.screenFlash = 1;
   }
 
-  // Спавн предметов
   function spawnItem() { 
     let x,y,d; 
     do{x=50+Math.random()*(W-100);y=50+Math.random()*(H-100);d=Math.hypot(x-state.player.x,y-state.player.y);}while(d<100); 
@@ -321,12 +356,12 @@
 
     for (let i = state.zombies.length - 1; i >= 0; i--) {
       const z = state.zombies[i]; const d = Math.hypot(z.x - item.x, z.y - item.y);
-      if (d < radius) { state.kills++; state.zombies.splice(i, 1); checkProgress(); }
-      else if (d < damageRadius) { z.hp -= damage; z.hitFlash = 1; if (z.hp <= 0) { state.kills++; state.zombies.splice(i, 1); checkProgress(); } }
+      if (d < radius) { state.kills++; state.ultCharge++; state.zombies.splice(i, 1); checkProgress(); }
+      else if (d < damageRadius) { z.hp -= damage; z.hitFlash = 1; if (z.hp <= 0) { state.kills++; state.ultCharge++; state.zombies.splice(i, 1); checkProgress(); } }
     }
     for (let i = state.miniBosses.length - 1; i >= 0; i--) {
       const z = state.miniBosses[i]; const d = Math.hypot(z.x - item.x, z.y - item.y);
-      if (d < radius) { z.hp -= damage * 2; z.hitFlash = 1; if (z.hp <= 0) { state.kills += 5; state.miniBosses.splice(i, 1); checkProgress(); } }
+      if (d < radius) { z.hp -= damage * 2; z.hitFlash = 1; if (z.hp <= 0) { state.kills += 5; state.ultCharge += 5; state.miniBosses.splice(i, 1); checkProgress(); } }
     }
     if (state.boss) {
       const d = Math.hypot(state.boss.x - item.x, state.boss.y - item.y);
@@ -355,10 +390,22 @@
     state.screenFlash = 1; state.cameraShake = 1.5;
   }
 
+  function activateUlt() {
+    if (state.ultCharge < state.ultMax || state.ultActive) return;
+    AudioEngine.playUlt();
+    state.ultActive = true;
+    state.ultTimer = 3.0;
+    state.ultSpikeTimer = 0;
+    state.ultCharge = 0; // Сброс заряда
+    state.screenFlash = 1.5;
+    state.cameraShake = 2;
+    syncHud();
+  }
+
   function increaseDifficulty() {
     AudioEngine.playLevelUp();
     state.difficulty++;
-    state.nextDiffKill += 75;
+    state.nextDiffKill += 150;
     
     ui.levelupMsg.style.opacity = 1;
     setTimeout(() => { if (state.difficulty > 1) ui.levelupMsg.style.opacity = 0; }, 2000);
@@ -379,7 +426,6 @@
     const p = state.player; const dx = state.mouse.x - p.x, dy = state.mouse.y - p.y;
     const len = Math.hypot(dx, dy) || 1; const speed = 720;
     
-    // Урон растет каждые 5 волн (+5)
     let baseDmg = 18 + Math.floor(state.wave / 5) * 5;
     if (state.buffs.damage > 0) baseDmg *= 2;
 
@@ -389,8 +435,33 @@
   function update(dt) {
     if (!state.running || state.over) return;
     state.t += dt;
+
+    // Обработка ультимейта
+    if (state.ultActive) {
+      state.ultTimer -= dt;
+      state.ultSpikeTimer -= dt;
+      
+      if (state.ultSpikeTimer <= 0) {
+        state.ultSpikeTimer = 1.0; // Каждую секунду выпускаем шипы
+        AudioEngine.playFrenzy();
+        
+        // Выпускаем шипы во все стороны
+        for (let angle = 0; angle < Math.PI * 2; angle += Math.PI / 8) {
+          state.bullets.push({
+            x: state.player.x, y: state.player.y,
+            vx: Math.cos(angle) * 600, vy: Math.sin(angle) * 600,
+            r: 4, life: 0.8, dmg: 30,
+            isSpike: true
+          });
+        }
+        state.cameraShake = Math.max(state.cameraShake, 0.5);
+      }
+
+      if (state.ultTimer <= 0) {
+        state.ultActive = false;
+      }
+    }
     
-    // Регенерация здоровья
     if (state.hp < state.maxHp) {
       state.hp = Math.min(state.maxHp, state.hp + state.regen * dt);
       syncHud();
@@ -407,30 +478,57 @@
     if (state.keys['KeyA'] || state.keys['ArrowLeft']) mx -= 1;
     if (state.keys['KeyD'] || state.keys['ArrowRight']) mx += 1;
     const mlen = Math.hypot(mx, my);
-    let currentSpeed = p.speed; if (state.buffs.speed > 0) currentSpeed *= 1.5;
+    
+    let currentSpeed = p.speed; 
+    if (state.buffs.speed > 0) currentSpeed *= 1.5;
+    if (state.ultActive) currentSpeed *= 2.0; // Ускорение от ульты
+
     if (mlen > 0) { p.x += (mx/mlen) * currentSpeed * dt; p.y += (my/mlen) * currentSpeed * dt; }
     p.x = Math.max(p.r, Math.min(W - p.r, p.x)); p.y = Math.max(p.r, Math.min(H - p.r, p.y));
 
-    // Подбор предметов
     for (let i = state.items.length - 1; i >= 0; i--) { const item = state.items[i]; item.pulse += dt * 5; if (Math.hypot(p.x - item.x, p.y - item.y) < p.r + item.r) { explodeItem(item); state.items.splice(i, 1); } }
     for (let i = state.medkits.length - 1; i >= 0; i--) { const mk = state.medkits[i]; mk.pulse += dt * 5; if (Math.hypot(p.x - mk.x, p.y - mk.y) < p.r + mk.r) { state.hp = Math.min(state.maxHp, state.hp + 30); AudioEngine.playMedkit(); state.medkits.splice(i, 1); syncHud(); } }
     for (let i = state.perks.length - 1; i >= 0; i--) { const perk = state.perks[i]; perk.pulse += dt * 5; if (Math.hypot(p.x - perk.x, p.y - perk.y) < p.r + perk.r) { state.buffs[perk.type] = 15; AudioEngine.playPerk(); state.perks.splice(i, 1); } }
 
     if (state.mouse.down) shoot();
 
-    for (let i = state.bullets.length - 1; i >= 0; i--) { const b = state.bullets[i]; b.x += b.vx * dt; b.y += b.vy * dt; b.life -= dt; if (b.life <= 0 || b.x < -20 || b.x > W + 20 || b.y < -20 || b.y > H + 20) state.bullets.splice(i, 1); }
-    for (let i = state.enemyBullets.length - 1; i >= 0; i--) { const eb = state.enemyBullets[i]; eb.x += eb.vx * dt; eb.y += eb.vy * dt; eb.life -= dt; if (Math.hypot(p.x - eb.x, p.y - eb.y) < p.r + eb.r) { let fd = eb.dmg; if (state.buffs.armor > 0) fd *= 0.5; state.hp -= fd; state.screenFlash = Math.max(state.screenFlash, 0.5); AudioEngine.playHit(); state.enemyBullets.splice(i, 1); if (state.hp <= 0) { state.hp = 0; gameOver(); } continue; } if (eb.life <= 0 || eb.x < -20 || eb.x > W + 20 || eb.y < -20 || eb.y > H + 20) state.enemyBullets.splice(i, 1); }
+    for (let i = state.bullets.length - 1; i >= 0; i--) { 
+      const b = state.bullets[i]; 
+      b.x += b.vx * dt; b.y += b.vy * dt; b.life -= dt; 
+      if (b.life <= 0 || b.x < -20 || b.x > W + 20 || b.y < -20 || b.y > H + 20) state.bullets.splice(i, 1); 
+    }
+    for (let i = state.enemyBullets.length - 1; i >= 0; i--) { 
+      const eb = state.enemyBullets[i]; eb.x += eb.vx * dt; eb.y += eb.vy * dt; eb.life -= dt; 
+      if (Math.hypot(p.x - eb.x, p.y - eb.y) < p.r + eb.r) { 
+        if (state.ultActive) {
+          state.enemyBullets.splice(i, 1);
+          continue;
+        }
+        let fd = eb.dmg; if (state.buffs.armor > 0) fd *= 0.5; state.hp -= fd; state.screenFlash = Math.max(state.screenFlash, 0.5); AudioEngine.playHit(); state.enemyBullets.splice(i, 1); if (state.hp <= 0) { state.hp = 0; gameOver(); } continue; 
+      } 
+      if (eb.life <= 0 || eb.x < -20 || eb.x > W + 20 || eb.y < -20 || eb.y > H + 20) state.enemyBullets.splice(i, 1); 
+    }
 
     // Зомби
     for (let i = state.zombies.length - 1; i >= 0; i--) {
       const z = state.zombies[i]; const dx = p.x - z.x, dy = p.y - z.y; const d = Math.hypot(dx, dy) || 1;
       z.x += (dx/d) * z.speed * dt; z.y += (dy/d) * z.speed * dt; z.hitFlash = Math.max(0, z.hitFlash - dt * 4);
-      if (d < z.r + p.r) { let fd = z.dmg; if (state.buffs.armor > 0) fd *= 0.5; state.hp -= fd * dt * 0.9; if (state.hp <= 0) { state.hp = 0; gameOver(); } }
+      if (d < z.r + p.r) { 
+        if (state.ultActive) {
+           // Если ульта активна - убиваем при контакте
+           state.kills++; state.ultCharge++;
+           state.zombies.splice(i, 1);
+           AudioEngine.playZombieDeath();
+           checkProgress();
+           continue;
+        }
+        let fd = z.dmg; if (state.buffs.armor > 0) fd *= 0.5; state.hp -= fd * dt * 0.9; if (state.hp <= 0) { state.hp = 0; gameOver(); } 
+      }
       for (let j = state.bullets.length - 1; j >= 0; j--) {
         const b = state.bullets[j];
         if (Math.hypot(b.x - z.x, b.y - z.y) < z.r + b.r) {
           z.hp -= b.dmg; z.hitFlash = 1; state.bullets.splice(j, 1);
-          if (z.hp <= 0) { state.kills++; state.zombies.splice(i, 1); AudioEngine.playZombieDeath(); checkProgress(); syncHud(); }
+          if (z.hp <= 0) { state.kills++; state.ultCharge++; state.zombies.splice(i, 1); AudioEngine.playZombieDeath(); checkProgress(); syncHud(); }
           break;
         }
       }
@@ -440,12 +538,22 @@
     for (let i = state.miniBosses.length - 1; i >= 0; i--) {
       const mb = state.miniBosses[i]; const dx = p.x - mb.x, dy = p.y - mb.y; const d = Math.hypot(dx, dy) || 1;
       mb.x += (dx/d) * mb.speed * dt; mb.y += (dy/d) * mb.speed * dt; mb.hitFlash = Math.max(0, mb.hitFlash - dt * 4);
-      if (d < mb.r + p.r) { let fd = mb.dmg; if (state.buffs.armor > 0) fd *= 0.5; state.hp -= fd * dt * 0.9; if (state.hp <= 0) { state.hp = 0; gameOver(); } }
+      if (d < mb.r + p.r) { 
+        if (state.ultActive) {
+           // Если ульта активна - убиваем при контакте
+           state.kills += 5; state.ultCharge += 5;
+           state.miniBosses.splice(i, 1);
+           AudioEngine.playExplosion();
+           checkProgress();
+           continue;
+        }
+        let fd = mb.dmg; if (state.buffs.armor > 0) fd *= 0.5; state.hp -= fd * dt * 0.9; if (state.hp <= 0) { state.hp = 0; gameOver(); } 
+      }
       for (let j = state.bullets.length - 1; j >= 0; j--) {
         const b = state.bullets[j];
         if (Math.hypot(b.x - mb.x, b.y - mb.y) < mb.r + b.r) {
           mb.hp -= b.dmg; mb.hitFlash = 1; state.bullets.splice(j, 1);
-          if (mb.hp <= 0) { state.kills += 5; state.miniBosses.splice(i, 1); AudioEngine.playExplosion(); state.screenFlash = 0.5; checkProgress(); syncHud(); }
+          if (mb.hp <= 0) { state.kills += 5; state.ultCharge += 5; state.miniBosses.splice(i, 1); AudioEngine.playExplosion(); state.screenFlash = 0.5; checkProgress(); syncHud(); }
           break;
         }
       }
@@ -458,14 +566,22 @@
         if (d > 100) { b.x += (dx/d) * b.speed * dt; b.y += (dy/d) * b.speed * dt; }
         b.hitFlash = Math.max(0, b.hitFlash - dt * 4); b.attackTimer -= dt;
         if (b.attackTimer <= 0) { b.attackTimer = 2.5; AudioEngine.playLightning(); for (let k = 0; k < 3; k++) { state.lightningStrikes.push({ x: p.x + (Math.random() - 0.5) * 300, y: p.y + (Math.random() - 0.5) * 300, timer: 1.0, maxTimer: 1.0, struck: false }); } }
-        if (d < b.r + p.r) { let fd = b.dmg; if (state.buffs.armor > 0) fd *= 0.5; state.hp -= fd * dt; if (state.hp <= 0) { state.hp = 0; gameOver(); } }
+        if (d < b.r + p.r) { 
+          if (!state.ultActive) {
+            let fd = b.dmg; if (state.buffs.armor > 0) fd *= 0.5; state.hp -= fd * dt; if (state.hp <= 0) { state.hp = 0; gameOver(); } 
+          }
+        }
       } else if (b.type === 'YUTIKO') {
         b.attackTimer -= dt; b.dashTimer -= dt;
         if (d > 300) { b.x += (dx/d) * b.speed * dt; b.y += (dy/d) * b.speed * dt; }
         else if (d < 200) { b.x -= (dx/d) * b.speed * 0.5 * dt; b.y -= (dy/d) * b.speed * 0.5 * dt; }
         if (b.dashTimer <= 0) { b.dashTimer = 4; b.x += (dx/d) * 150; b.y += (dy/d) * 150; b.x = Math.max(b.r, Math.min(W - b.r, b.x)); b.y = Math.max(b.r, Math.min(H - b.r, b.y)); AudioEngine.playFrenzy(); }
         if (b.attackTimer <= 0) { b.attackTimer = 0.8; AudioEngine.playBossShoot(); const angle = Math.atan2(dy, dx); state.enemyBullets.push({ x: b.x, y: b.y, vx: Math.cos(angle) * 400, vy: Math.sin(angle) * 400, r: 5, life: 2.0, dmg: b.dmg }); }
-        if (d < b.r + p.r) { let fd = b.dmg; if (state.buffs.armor > 0) fd *= 0.5; state.hp -= fd * dt; if (state.hp <= 0) { state.hp = 0; gameOver(); } }
+        if (d < b.r + p.r) { 
+          if (!state.ultActive) {
+            let fd = b.dmg; if (state.buffs.armor > 0) fd *= 0.5; state.hp -= fd * dt; if (state.hp <= 0) { state.hp = 0; gameOver(); } 
+          }
+        }
       }
       for (let j = state.bullets.length - 1; j >= 0; j--) {
         const blt = state.bullets[j];
@@ -479,6 +595,7 @@
             state.screenFlash = 1.5; 
             state.cameraShake = 3; 
             state.kills += 15; 
+            state.ultCharge += 15;
             
             if (bossType === 'FRICH') {
               state.maxHp += 50;
@@ -498,7 +615,7 @@
     // Молнии
     for (let i = state.lightningStrikes.length - 1; i >= 0; i--) {
       const ls = state.lightningStrikes[i]; ls.timer -= dt;
-      if (ls.timer <= 0 && !ls.struck) { ls.struck = true; AudioEngine.playExplosion(); if (Math.hypot(p.x - ls.x, p.y - ls.y) < 60) { let fd = 35; if (state.buffs.armor > 0) fd *= 0.5; state.hp -= fd; state.screenFlash = 1; state.cameraShake = 2; if (state.hp <= 0) { state.hp = 0; gameOver(); } } }
+      if (ls.timer <= 0 && !ls.struck) { ls.struck = true; AudioEngine.playExplosion(); if (Math.hypot(p.x - ls.x, p.y - ls.y) < 60) { if (!state.ultActive) { let fd = 35; if (state.buffs.armor > 0) fd *= 0.5; state.hp -= fd; state.screenFlash = 1; state.cameraShake = 2; if (state.hp <= 0) { state.hp = 0; gameOver(); } } } }
       if (ls.timer <= -0.5) state.lightningStrikes.splice(i, 1);
     }
 
@@ -508,35 +625,29 @@
     const spawnInterval = Math.max(0.15, 1.1 - state.wave * 0.06);
     if (state.spawnTimer <= 0) { spawnZombie(); if (state.wave > 5 && Math.random() < 0.4) spawnZombie(); state.spawnTimer = spawnInterval; }
 
-    // Смена волны
     if (state.waveTimer > 18) {
       state.waveTimer = 0; state.wave++;
       if (state.wave === 10 || state.wave === 20) { spawnBoss(); }
       else if (state.wave % 3 === 0) { spawnMiniBoss(); state.hp = Math.min(state.maxHp, state.hp + 12); }
       else { state.hp = Math.min(state.maxHp, state.hp + 12); }
       
-      // Каждые 5 волн показываем сообщение об уроне
       if (state.wave % 5 === 0) {
         showBossRewardMsg(`УРОН УВЕЛИЧЕН!`);
       }
       syncHud();
     }
 
-    // УЧАЩЕННЫЙ СПАВН ПРЕДМЕТОВ В ЗАВИСИМОСТИ ОТ СЛОЖНОСТИ
     const diff = state.difficulty;
-    
     state.itemTimer -= dt; 
     if (state.itemTimer <= 0 && state.items.length < 10) { 
       spawnItem(); 
       state.itemTimer = Math.max(0.8, 3 - diff * 0.2); 
     }
-    
     state.medkitTimer -= dt; 
     if (state.medkitTimer <= 0 && state.medkits.length < 8) { 
       spawnMedkit(); 
       state.medkitTimer = Math.max(2, 8 - diff * 0.5); 
     }
-    
     state.perkTimer -= dt; 
     if (state.perkTimer <= 0 && state.perks.length < 6) { 
       spawnPerk(); 
@@ -568,7 +679,6 @@
   }
 
   function draw() {
-    // НЕОНОВЫЙ ПЕРЕЛИВАЮЩИЙСЯ ФОН
     ctx.fillStyle = '#0b0f0b';
     ctx.fillRect(0, 0, W, H);
     
@@ -584,6 +694,11 @@
     grad2.addColorStop(1, 'rgba(11, 15, 11, 0)');
     ctx.fillStyle = grad2;
     ctx.fillRect(0, 0, W, H);
+    
+    if (state.ultActive) {
+       ctx.fillStyle = 'rgba(255, 215, 0, 0.1)';
+       ctx.fillRect(0, 0, W, H);
+    }
 
     ctx.strokeStyle = `hsla(${180 + Math.sin(time)*60}, 50%, 50%, 0.1)`;
     ctx.lineWidth = 1;
@@ -597,7 +712,6 @@
     for (const pt of state.particles) { const a = pt.life / pt.maxLife; ctx.globalAlpha = a; ctx.fillStyle = pt.color; ctx.beginPath(); ctx.arc(pt.x, pt.y, 3, 0, Math.PI*2); ctx.fill(); }
     ctx.globalAlpha = 1;
 
-    // Бомбы
     for (const item of state.items) { 
       const pulse = 1 + Math.sin(item.pulse) * 0.2; 
       if (item.isMega) {
@@ -612,25 +726,30 @@
       }
     }
 
-    // Аптечки
     for (const mk of state.medkits) { const pulse = 1 + Math.sin(mk.pulse) * 0.15; ctx.fillStyle = '#f0f0f0'; ctx.fillRect(mk.x - mk.r * pulse, mk.y - mk.r * pulse, mk.r * 2 * pulse, mk.r * 2 * pulse); ctx.strokeStyle = '#888'; ctx.lineWidth = 2; ctx.strokeRect(mk.x - mk.r * pulse, mk.y - mk.r * pulse, mk.r * 2 * pulse, mk.r * 2 * pulse); ctx.fillStyle = '#ff3333'; ctx.fillRect(mk.x - 2, mk.y - 6, 4, 12); ctx.fillRect(mk.x - 6, mk.y - 2, 12, 4); }
-    // Перки
     for (const perk of state.perks) { const pulse = 1 + Math.sin(perk.pulse) * 0.2; ctx.fillStyle = '#d946ef'; ctx.shadowColor = '#d946ef'; ctx.shadowBlur = 10; ctx.beginPath(); ctx.arc(perk.x, perk.y, perk.r * pulse, 0, Math.PI*2); ctx.fill(); ctx.shadowBlur = 0; ctx.fillStyle = '#fff'; ctx.font = 'bold 14px Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; if (perk.type === 'speed') ctx.fillText('👟', perk.x, perk.y); if (perk.type === 'armor') ctx.fillText('🛡️', perk.x, perk.y); if (perk.type === 'damage') ctx.fillText('🔫', perk.x, perk.y); if (perk.type === 'firerate') ctx.fillText('💥', perk.x, perk.y); }
 
-    // Молнии
     for (const ls of state.lightningStrikes) {
       if (!ls.struck) { ctx.beginPath(); ctx.arc(ls.x, ls.y, 60, 0, Math.PI*2); ctx.fillStyle = `rgba(255, 0, 0, ${0.2 + Math.sin(state.t * 20) * 0.1})`; ctx.fill(); ctx.strokeStyle = '#ff0000'; ctx.lineWidth = 2; ctx.stroke(); }
       else { ctx.strokeStyle = '#00ffff'; ctx.lineWidth = 4; ctx.shadowColor = '#00ffff'; ctx.shadowBlur = 20; ctx.beginPath(); ctx.moveTo(ls.x, ls.y - 300); ctx.lineTo(ls.x - 10, ls.y - 150); ctx.lineTo(ls.x + 15, ls.y - 80); ctx.lineTo(ls.x - 5, ls.y); ctx.stroke(); ctx.shadowBlur = 0; }
     }
 
-    // Пули
-    for (const b of state.bullets) { ctx.fillStyle = state.frenzyActive ? '#ffaa00' : '#ffe066'; ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI*2); ctx.fill(); }
+    for (const b of state.bullets) { 
+      if (b.isSpike) {
+        ctx.fillStyle = '#ffcc00'; 
+        ctx.shadowColor = '#ffcc00'; 
+        ctx.shadowBlur = 10;
+        ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI*2); ctx.fill(); 
+        ctx.shadowBlur = 0;
+      } else {
+        ctx.fillStyle = state.frenzyActive ? '#ffaa00' : '#ffe066'; 
+        ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI*2); ctx.fill(); 
+      }
+    }
     for (const eb of state.enemyBullets) { ctx.fillStyle = '#00ffff'; ctx.shadowColor = '#00ffff'; ctx.shadowBlur = 10; ctx.beginPath(); ctx.arc(eb.x, eb.y, eb.r, 0, Math.PI*2); ctx.fill(); ctx.shadowBlur = 0; }
 
-    // Зомби
     for (const z of state.zombies) { ctx.fillStyle = z.hitFlash > 0 ? '#ffffff' : '#5cbf5c'; ctx.beginPath(); ctx.arc(z.x, z.y, z.r, 0, Math.PI*2); ctx.fill(); ctx.strokeStyle = '#2a5a2a'; ctx.lineWidth = 2; ctx.stroke(); const w = z.r * 2; const hpFrac = z.hp / z.maxHp; ctx.fillStyle = '#3a0f0f'; ctx.fillRect(z.x - z.r, z.y - z.r - 8, w, 4); ctx.fillStyle = '#ff5c5c'; ctx.fillRect(z.x - z.r, z.y - z.r - 8, w * hpFrac, 4); }
 
-    // Мини-боссы
     for (const mb of state.miniBosses) {
       ctx.fillStyle = mb.hitFlash > 0 ? '#ffffff' : '#a020f0';
       ctx.shadowColor = '#d946ef'; ctx.shadowBlur = 15;
@@ -642,7 +761,6 @@
       ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(mb.x - 8, mb.y - 5, 4, 0, Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.arc(mb.x + 8, mb.y - 5, 4, 0, Math.PI*2); ctx.fill();
     }
 
-    // Главные Боссы
     if (state.boss) {
       const b = state.boss;
       ctx.fillStyle = b.hitFlash > 0 ? '#ffffff' : (b.type === 'FRICH' ? '#8b0000' : '#0055ff');
@@ -658,12 +776,13 @@
       }
     }
 
-    // Игрок
     const p = state.player;
     if (state.frenzyActive) { ctx.shadowColor = '#ff3333'; ctx.shadowBlur = 20; }
-    ctx.fillStyle = state.frenzyActive ? '#ff4d4d' : '#4aa8ff';
+    if (state.ultActive) { ctx.shadowColor = '#ffcc00'; ctx.shadowBlur = 30; } // Свечение ульты
+    
+    ctx.fillStyle = state.ultActive ? '#ffcc00' : (state.frenzyActive ? '#ff4d4d' : '#4aa8ff');
     ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI*2); ctx.fill(); ctx.shadowBlur = 0;
-    ctx.strokeStyle = state.frenzyActive ? '#aa0000' : '#1b5a99'; ctx.lineWidth = 2; ctx.stroke();
+    ctx.strokeStyle = state.ultActive ? '#ffaa00' : (state.frenzyActive ? '#aa0000' : '#1b5a99'); ctx.lineWidth = 2; ctx.stroke();
 
     if (state.buffs.armor > 0) { ctx.strokeStyle = 'rgba(100, 200, 255, 0.5)'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(p.x, p.y, p.r + 5, 0, Math.PI*2); ctx.stroke(); }
     if (state.buffs.speed > 0) { ctx.strokeStyle = 'rgba(100, 255, 100, 0.5)'; ctx.lineWidth = 2; ctx.setLineDash([5, 5]); ctx.beginPath(); ctx.arc(p.x, p.y, p.r + 8, 0, Math.PI*2); ctx.stroke(); ctx.setLineDash([]); }
@@ -676,13 +795,11 @@
     ctx.strokeStyle = state.frenzyActive ? 'rgba(255,100,100,.8)' : 'rgba(255,255,255,.8)'; ctx.lineWidth = 1.5;
     ctx.beginPath(); ctx.arc(state.mouse.x, state.mouse.y, 7, 0, Math.PI*2); ctx.moveTo(state.mouse.x - 12, state.mouse.y); ctx.lineTo(state.mouse.x + 12, state.mouse.y); ctx.moveTo(state.mouse.x, state.mouse.y - 12); ctx.lineTo(state.mouse.x, state.mouse.y + 12); ctx.stroke();
 
-    // Полоска здоровья
     const barW = 220, barH = 14; const bx = 16, by = H - 30;
     ctx.fillStyle = 'rgba(0,0,0,.5)'; ctx.fillRect(bx, by, barW, barH);
     ctx.fillStyle = state.hp > 30 ? '#4ade80' : '#f87171'; ctx.fillRect(bx, by, barW * (state.hp / state.maxHp), barH);
     ctx.strokeStyle = '#2a3a2a'; ctx.strokeRect(bx, by, barW, barH);
     
-    // Текст на полоске здоровья
     ctx.fillStyle = '#fff';
     ctx.font = '12px monospace';
     ctx.textAlign = 'left';
