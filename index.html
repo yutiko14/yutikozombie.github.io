@@ -181,7 +181,7 @@
     if (document.activeElement) document.activeElement.blur();
 
     state.running = true; state.over = false;
-    state.hp = 100; state.maxHp = 100; // Сброс здоровья
+    state.hp = 100; state.maxHp = 100;
     state.kills = 0; state.wave = 1; state.difficulty = 1;
     state.waveTimer = 0; state.spawnTimer = 0;
     state.itemTimer = 2; state.medkitTimer = 5; state.perkTimer = 5;
@@ -471,7 +471,7 @@
             // НАГРАДА ЗА БОССА: +ЗДОРОВЬЕ
             if (bossType === 'FRICH') {
               state.maxHp += 50;
-              state.hp = state.maxHp; // Восстанавливаем до максимума
+              state.hp = state.maxHp;
               showBossRewardMsg('+50 МАКС. HP');
             } else if (bossType === 'YUTIKO') {
               state.maxHp += 100;
@@ -506,10 +506,26 @@
       syncHud();
     }
 
-    // Учащенный спавн предметов
-    state.itemTimer -= dt; if (state.itemTimer <= 0 && state.items.length < 6) { spawnItem(); state.itemTimer = 3 + Math.random() * 2; }
-    state.medkitTimer -= dt; if (state.medkitTimer <= 0 && state.medkits.length < 5) { spawnMedkit(); state.medkitTimer = 8 + Math.random() * 4; }
-    state.perkTimer -= dt; if (state.perkTimer <= 0 && state.perks.length < 4) { spawnPerk(); state.perkTimer = 10 + Math.random() * 5; }
+    // УЧАЩЕННЫЙ СПАВН ПРЕДМЕТОВ В ЗАВИСИМОСТИ ОТ СЛОЖНОСТИ
+    const diff = state.difficulty;
+    
+    state.itemTimer -= dt; 
+    if (state.itemTimer <= 0 && state.items.length < 10) { 
+      spawnItem(); 
+      state.itemTimer = Math.max(0.8, 3 - diff * 0.2); 
+    }
+    
+    state.medkitTimer -= dt; 
+    if (state.medkitTimer <= 0 && state.medkits.length < 8) { 
+      spawnMedkit(); 
+      state.medkitTimer = Math.max(2, 8 - diff * 0.5); 
+    }
+    
+    state.perkTimer -= dt; 
+    if (state.perkTimer <= 0 && state.perks.length < 6) { 
+      spawnPerk(); 
+      state.perkTimer = Math.max(3, 10 - diff * 0.6); 
+    }
 
     syncHud();
   }
@@ -517,12 +533,11 @@
   // Вспомогательная функция для показа награды за босса
   function showBossRewardMsg(text) {
     ui.levelupMsg.textContent = text;
-    ui.levelupMsg.style.color = '#4ade80'; // Зеленый цвет для здоровья
+    ui.levelupMsg.style.color = '#4ade80';
     ui.levelupMsg.style.textShadow = '0 0 20px #4ade80';
     ui.levelupMsg.style.opacity = 1;
     setTimeout(() => { 
       ui.levelupMsg.style.opacity = 0; 
-      // Возвращаем стандартный цвет для повышения сложности
       setTimeout(() => {
         ui.levelupMsg.textContent = 'СЛОЖНОСТЬ ПОВЫШЕНА!';
         ui.levelupMsg.style.color = '#ff5c5c';
@@ -567,34 +582,18 @@
     for (const pt of state.particles) { const a = pt.life / pt.maxLife; ctx.globalAlpha = a; ctx.fillStyle = pt.color; ctx.beginPath(); ctx.arc(pt.x, pt.y, 3, 0, Math.PI*2); ctx.fill(); }
     ctx.globalAlpha = 1;
 
-    // Бомбы (Обычные и Мега)
+    // Бомбы
     for (const item of state.items) { 
       const pulse = 1 + Math.sin(item.pulse) * 0.2; 
       if (item.isMega) {
-        ctx.fillStyle = '#ff0000'; 
-        ctx.shadowColor = '#ff0000';
-        ctx.shadowBlur = 15;
+        ctx.fillStyle = '#ff0000'; ctx.shadowColor = '#ff0000'; ctx.shadowBlur = 15;
         ctx.beginPath(); ctx.arc(item.x, item.y, item.r * 1.2 * pulse, 0, Math.PI*2); ctx.fill(); 
-        ctx.shadowBlur = 0;
-        ctx.strokeStyle = '#ffff00'; 
-        ctx.lineWidth = 3; 
-        ctx.stroke(); 
-        ctx.fillStyle = '#ffff00'; 
-        ctx.font = 'bold 16px Arial'; 
-        ctx.textAlign = 'center'; 
-        ctx.textBaseline = 'middle'; 
-        ctx.fillText('!!', item.x, item.y);
+        ctx.shadowBlur = 0; ctx.strokeStyle = '#ffff00'; ctx.lineWidth = 3; ctx.stroke(); 
+        ctx.fillStyle = '#ffff00'; ctx.font = 'bold 16px Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('!!', item.x, item.y);
       } else {
-        ctx.fillStyle = '#ffcc00'; 
-        ctx.beginPath(); ctx.arc(item.x, item.y, item.r * pulse, 0, Math.PI*2); ctx.fill(); 
-        ctx.strokeStyle = '#ff5c5c'; 
-        ctx.lineWidth = 2; 
-        ctx.stroke(); 
-        ctx.fillStyle = '#ff5c5c'; 
-        ctx.font = 'bold 14px Arial'; 
-        ctx.textAlign = 'center'; 
-        ctx.textBaseline = 'middle'; 
-        ctx.fillText('!', item.x, item.y); 
+        ctx.fillStyle = '#ffcc00'; ctx.beginPath(); ctx.arc(item.x, item.y, item.r * pulse, 0, Math.PI*2); ctx.fill(); 
+        ctx.strokeStyle = '#ff5c5c'; ctx.lineWidth = 2; ctx.stroke(); 
+        ctx.fillStyle = '#ff5c5c'; ctx.font = 'bold 14px Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('!', item.x, item.y); 
       }
     }
 
