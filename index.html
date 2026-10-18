@@ -12,6 +12,7 @@
   #hud{position:fixed;top:10px;left:12px;color:#cfe8cf;font-size:14px;text-shadow:0 1px 2px #000;pointer-events:none;line-height:1.5;display:none}
   #hud .bonus{color:#ff6b6b;font-weight:bold;display:none;}
   #hud .difficulty{color:#ffaa00;font-weight:bold;display:none;}
+  
   #boss-hud {
     position:fixed; top:10px; left:50%; transform:translateX(-50%);
     width: 50%; min-width: 300px; text-align: center;
@@ -124,6 +125,7 @@
     finalWave: document.getElementById('finalWave'),
     levelupMsg: document.getElementById('levelup-msg'),
     bossHud: document.getElementById('boss-hud'),
+    bossName: document.getElementById('boss-name'),
     bossBarFill: document.getElementById('boss-bar-fill'),
   };
 
@@ -163,6 +165,22 @@
       gain.connect(this.masterGain);
       osc.start(t);
       osc.stop(t + 0.1);
+    },
+
+    playBossShoot() {
+      if (!this.isInitialized) return;
+      const t = this.ctx.currentTime;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(300, t);
+      osc.frequency.exponentialRampToValueAtTime(50, t + 0.15);
+      gain.gain.setValueAtTime(0.2, t);
+      gain.gain.exponentialRampToValueAtTime(0.01, t + 0.15);
+      osc.connect(gain);
+      gain.connect(this.masterGain);
+      osc.start(t);
+      osc.stop(t + 0.15);
     },
 
     playHit() {
@@ -372,10 +390,11 @@
     zombies: [],
     boss: null,
     bullets: [],
+    enemyBullets: [],
     particles: [],
-    items: [],     // бомбы
-    medkits: [],   // аптечки
-    perks: [],     // усиления
+    items: [],
+    medkits: [],
+    perks: [],
     lightningStrikes: [],
     keys: {},
     mouse: { x: W/2, y: H/2, down: false },
@@ -386,7 +405,6 @@
     frenzyTime: 0,
     frenzyActive: false,
     
-    // Активные баффы игрока
     buffs: { speed: 0, armor: 0, damage: 0, firerate: 0 },
     
     screenFlash: 0,
@@ -415,6 +433,7 @@
     state.zombies = [];
     state.boss = null;
     state.bullets = [];
+    state.enemyBullets = [];
     state.particles = [];
     state.items = [];
     state.medkits = [];
@@ -509,16 +528,39 @@
   }
 
   function spawnBoss() {
-    state.boss = {
-      x: W/2, y: -50,
-      r: 50,
-      hp: 1500, maxHp: 1500,
-      speed: 35,
-      dmg: 20,
-      hitFlash: 0,
-      attackTimer: 2,
-    };
+    if (state.wave === 10) {
+      // ФРИЧ (Молнии)
+      state.boss = {
+        type: 'FRICH',
+        x: W/2, y: -50,
+        r: 50,
+        hp: 1500, maxHp: 1500,
+        speed: 35,
+        dmg: 20,
+        hitFlash: 0,
+        attackTimer: 2,
+      };
+      ui.bossName.textContent = 'ФРИЧ';
+      ui.bossName.style.color = '#ff3333';
+    } else if (state.wave === 20) {
+      // yutiko (Пистолет, стреляет пулями)
+      state.boss = {
+        type: 'YUTIKO',
+        x: W/2, y: -50,
+        r: 35,
+        hp: 2500, maxHp: 2500,
+        speed: 120, // Очень быстрый
+        dmg: 15,
+        hitFlash: 0,
+        attackTimer: 1.5,
+        dashTimer: 5,
+      };
+      ui.bossName.textContent = 'yutiko';
+      ui.bossName.style.color = '#00ffff';
+    }
+    
     ui.bossHud.style.display = 'block';
+    ui.bossBarFill.style.width = '100%';
     AudioEngine.playLevelUp();
     state.screenFlash = 1;
   }
@@ -610,7 +652,7 @@
   function shoot() {
     const now = performance.now();
     let cd = state.frenzyActive ? state.bonusCooldown : state.baseCooldown;
-    if (state.buffs.firerate > 0) cd *= 0.6; // Ускорение стрельбы от перка
+    if (state.buffs.firerate > 0) cd *= 0.6;
 
     if (now - state.lastShot < cd) return;
     state.lastShot = now;
@@ -624,7 +666,7 @@
     const speed = 720;
     
     let dmg = 18;
-    if (state.buffs.damage > 0) dmg *= 2; // Двойной урон
+    if (state.buffs.damage > 0) dmg *= 2;
 
     state.bullets.push({
       x: p.x + dx/len * (p.r + 4),
@@ -644,7 +686,6 @@
     if (state.screenFlash > 0) state.screenFlash -= dt * 2;
     if (state.cameraShake > 0) state.cameraShake -= dt * 3;
 
-    // Таймеры баффов
     for (let key in state.buffs) {
       if (state.buffs[key] > 0) state.buffs[key] -= dt;
     }
@@ -700,12 +741,12 @@
       }
     }
 
-    // Перки (Усиления)
+    // Перки
     for (let i = state.perks.length - 1; i >= 0; i--) {
       const perk = state.perks[i];
       perk.pulse += dt * 5;
       if (Math.hypot(p.x - perk.x, p.y - perk.y) < p.r + perk.r) {
-        state.buffs[perk.type] = 15; // 15 секунд
+        state.buffs[perk.type] = 15;
         AudioEngine.playPerk();
         for (let k = 0; k < 15; k++) {
           state.particles.push({ x: p.x, y: p.y, vx: (Math.random()-0.5)*200, vy: (Math.random()-0.5)*200, life: 0.6, maxLife: 0.6, color: '#d946ef' });
@@ -726,6 +767,31 @@
       }
     }
 
+    // Вражеские пули
+    for (let i = state.enemyBullets.length - 1; i >= 0; i--) {
+      const eb = state.enemyBullets[i];
+      eb.x += eb.vx * dt;
+      eb.y += eb.vy * dt;
+      eb.life -= dt;
+      
+      // Проверка на попадание в игрока
+      if (Math.hypot(p.x - eb.x, p.y - eb.y) < p.r + eb.r) {
+        let finalDmg = eb.dmg;
+        if (state.buffs.armor > 0) finalDmg *= 0.5;
+        state.hp -= finalDmg;
+        state.screenFlash = Math.max(state.screenFlash, 0.5);
+        state.cameraShake = Math.max(state.cameraShake, 1);
+        AudioEngine.playHit();
+        state.enemyBullets.splice(i, 1);
+        if (state.hp <= 0) { state.hp = 0; gameOver(); }
+        continue;
+      }
+
+      if (eb.life <= 0 || eb.x < -20 || eb.x > W + 20 || eb.y < -20 || eb.y > H + 20) {
+        state.enemyBullets.splice(i, 1);
+      }
+    }
+
     // Обычные зомби
     for (let i = state.zombies.length - 1; i >= 0; i--) {
       const z = state.zombies[i];
@@ -737,7 +803,7 @@
 
       if (d < z.r + p.r) {
         let finalDmg = z.dmg;
-        if (state.buffs.armor > 0) finalDmg *= 0.5; // Броня
+        if (state.buffs.armor > 0) finalDmg *= 0.5;
         state.hp -= finalDmg * dt * 0.9;
         
         const now = performance.now();
@@ -769,46 +835,93 @@
       }
     }
 
-    // БОСС ФРИЧ
+    // БОСС
     if (state.boss) {
       const b = state.boss;
       const dx = p.x - b.x, dy = p.y - b.y;
       const d = Math.hypot(dx, dy) || 1;
       
-      if (d > 100) { // Не прилипает вплотную
-        b.x += (dx/d) * b.speed * dt;
-        b.y += (dy/d) * b.speed * dt;
-      }
-      
-      b.hitFlash = Math.max(0, b.hitFlash - dt * 4);
-      b.attackTimer -= dt;
+      // Движение босса
+      if (b.type === 'FRICH') {
+        if (d > 100) {
+          b.x += (dx/d) * b.speed * dt;
+          b.y += (dy/d) * b.speed * dt;
+        }
+        b.hitFlash = Math.max(0, b.hitFlash - dt * 4);
+        b.attackTimer -= dt;
 
-      // Атака молниями
-      if (b.attackTimer <= 0) {
-        b.attackTimer = 2.5; // Каждые 2.5 сек
-        AudioEngine.playLightning();
+        if (b.attackTimer <= 0) {
+          b.attackTimer = 2.5;
+          AudioEngine.playLightning();
+          for (let k = 0; k < 3; k++) {
+            state.lightningStrikes.push({
+              x: p.x + (Math.random() - 0.5) * 300,
+              y: p.y + (Math.random() - 0.5) * 300,
+              timer: 1.0, maxTimer: 1.0, struck: false
+            });
+          }
+        }
+
+        if (d < b.r + p.r) {
+          let finalDmg = b.dmg;
+          if (state.buffs.armor > 0) finalDmg *= 0.5;
+          state.hp -= finalDmg * dt;
+          if (state.hp <= 0) { state.hp = 0; gameOver(); }
+        }
+      } 
+      else if (b.type === 'YUTIKO') {
+        // yutiko постоянно стреляет
+        b.attackTimer -= dt;
+        b.dashTimer -= dt;
         
-        // Создаем 3 удара молний
-        for (let k = 0; k < 3; k++) {
-          state.lightningStrikes.push({
-            x: p.x + (Math.random() - 0.5) * 300,
-            y: p.y + (Math.random() - 0.5) * 300,
-            timer: 1.0, // 1 сек до удара
-            maxTimer: 1.0,
-            struck: false
+        // Движение к игроку с дистанции
+        if (d > 300) {
+          b.x += (dx/d) * b.speed * dt;
+          b.y += (dy/d) * b.speed * dt;
+        } else if (d < 200) {
+          // Отходит, если слишком близко
+          b.x -= (dx/d) * b.speed * 0.5 * dt;
+          b.y -= (dy/d) * b.speed * 0.5 * dt;
+        }
+
+        // Рывок (Dash)
+        if (b.dashTimer <= 0) {
+          b.dashTimer = 4; // Каждые 4 секунды
+          b.x += (dx/d) * 150;
+          b.y += (dy/d) * 150;
+          // Ограничение по краям
+          b.x = Math.max(b.r, Math.min(W - b.r, b.x));
+          b.y = Math.max(b.r, Math.min(H - b.r, b.y));
+          AudioEngine.playFrenzy(); // Звук рывка
+        }
+
+        if (b.attackTimer <= 0) {
+          b.attackTimer = 0.8; // Очень быстрая стрельба
+          AudioEngine.playBossShoot();
+          
+          // Пуля летит точно в игрока
+          const angle = Math.atan2(dy, dx);
+          const bulletSpeed = 400;
+          state.enemyBullets.push({
+            x: b.x, y: b.y,
+            vx: Math.cos(angle) * bulletSpeed,
+            vy: Math.sin(angle) * bulletSpeed,
+            r: 5,
+            life: 2.0,
+            dmg: b.dmg
           });
+        }
+
+        if (d < b.r + p.r) {
+          // Контактный урон
+          let finalDmg = b.dmg;
+          if (state.buffs.armor > 0) finalDmg *= 0.5;
+          state.hp -= finalDmg * dt;
+          if (state.hp <= 0) { state.hp = 0; gameOver(); }
         }
       }
 
-      // Коллизия с игроком
-      if (d < b.r + p.r) {
-        let finalDmg = b.dmg;
-        if (state.buffs.armor > 0) finalDmg *= 0.5;
-        state.hp -= finalDmg * dt;
-        if (state.hp <= 0) { state.hp = 0; gameOver(); }
-      }
-
-      // Коллизия с пулями
+      // Коллизия с пулями игрока
       for (let j = state.bullets.length - 1; j >= 0; j--) {
         const blt = state.bullets[j];
         if (Math.hypot(blt.x - b.x, blt.y - b.y) < b.r + blt.r) {
@@ -825,8 +938,7 @@
             AudioEngine.playExplosion();
             state.screenFlash = 1.5;
             state.cameraShake = 3;
-            // Награда за босса
-            state.kills += 10;
+            state.kills += 15;
             for (let k = 0; k < 50; k++) {
               state.particles.push({ x: b.x, y: b.y, vx: (Math.random()-0.5)*400, vy: (Math.random()-0.5)*400, life: 1.5, maxLife: 1.5, color: '#ffaa00' });
             }
@@ -835,16 +947,15 @@
       }
     }
 
-    // Обработка ударов молний
+    // Молнии ФРИЧА
     for (let i = state.lightningStrikes.length - 1; i >= 0; i--) {
       const ls = state.lightningStrikes[i];
       ls.timer -= dt;
       
       if (ls.timer <= 0 && !ls.struck) {
         ls.struck = true;
-        AudioEngine.playExplosion(); // Звук удара
+        AudioEngine.playExplosion();
         
-        // Проверка на урон игроку
         const distToPlayer = Math.hypot(p.x - ls.x, p.y - ls.y);
         if (distToPlayer < 60) {
           let finalDmg = 35;
@@ -855,15 +966,11 @@
           if (state.hp <= 0) { state.hp = 0; gameOver(); }
         }
         
-        // Визуальные частицы
         for (let k = 0; k < 20; k++) {
           state.particles.push({ x: ls.x, y: ls.y, vx: (Math.random()-0.5)*300, vy: (Math.random()-0.5)*300, life: 0.6, maxLife: 0.6, color: '#00ffff' });
         }
       }
-      
-      if (ls.timer <= -0.5) { // Держим эффект полсекунды после удара
-        state.lightningStrikes.splice(i, 1);
-      }
+      if (ls.timer <= -0.5) state.lightningStrikes.splice(i, 1);
     }
 
     for (let i = state.particles.length - 1; i >= 0; i--) {
@@ -888,8 +995,8 @@
       state.waveTimer = 0;
       state.wave++;
       
-      // СПАВН БОССА НА 10 ВОЛНЕ
-      if (state.wave === 10 && !state.boss) {
+      // БОССЫ
+      if (state.wave === 10 || state.wave === 20) {
         spawnBoss();
       } else {
         state.hp = Math.min(state.maxHp, state.hp + 12);
@@ -897,7 +1004,6 @@
       syncHud();
     }
 
-    // Таймеры спавна предметов
     state.itemTimer -= dt;
     if (state.itemTimer <= 0 && state.items.length < 4) {
       spawnItem();
@@ -1010,7 +1116,7 @@
       if (perk.type === 'firerate') ctx.fillText('💥', perk.x, perk.y);
     }
 
-    // Молнии (предупреждение)
+    // Молнии (ФРИЧ)
     for (const ls of state.lightningStrikes) {
       if (!ls.struck) {
         ctx.beginPath();
@@ -1021,7 +1127,6 @@
         ctx.lineWidth = 2;
         ctx.stroke();
       } else {
-        // Сам удар
         ctx.strokeStyle = '#00ffff';
         ctx.lineWidth = 4;
         ctx.shadowColor = '#00ffff';
@@ -1036,10 +1141,19 @@
       }
     }
 
-    // Пули
+    // Пули игрока
     for (const b of state.bullets) {
       ctx.fillStyle = state.frenzyActive ? '#ffaa00' : '#ffe066';
       ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI*2); ctx.fill();
+    }
+
+    // Вражеские пули (yutiko)
+    for (const eb of state.enemyBullets) {
+      ctx.fillStyle = '#00ffff';
+      ctx.shadowColor = '#00ffff';
+      ctx.shadowBlur = 10;
+      ctx.beginPath(); ctx.arc(eb.x, eb.y, eb.r, 0, Math.PI*2); ctx.fill();
+      ctx.shadowBlur = 0;
     }
 
     // Зомби
@@ -1060,28 +1174,39 @@
       ctx.beginPath(); ctx.arc(z.x + z.r*0.35, z.y - z.r*0.15, 2.2, 0, Math.PI*2); ctx.fill();
     }
 
-    // БОСС ФРИЧ
+    // БОССЫ
     if (state.boss) {
       const b = state.boss;
-      ctx.fillStyle = b.hitFlash > 0 ? '#ffffff' : '#8b0000';
-      ctx.shadowColor = '#ff0000';
+      ctx.fillStyle = b.hitFlash > 0 ? '#ffffff' : (b.type === 'FRICH' ? '#8b0000' : '#0055ff');
+      ctx.shadowColor = b.type === 'FRICH' ? '#ff0000' : '#00ffff';
       ctx.shadowBlur = 30;
       ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI*2); ctx.fill();
       ctx.shadowBlur = 0;
       
-      ctx.strokeStyle = '#ff0000';
+      ctx.strokeStyle = b.type === 'FRICH' ? '#ff0000' : '#00ffff';
       ctx.lineWidth = 4;
       ctx.stroke();
       
-      // Глаза босса
-      ctx.fillStyle = '#ffff00';
-      ctx.beginPath(); ctx.arc(b.x - 15, b.y - 10, 6, 0, Math.PI*2); ctx.fill();
-      ctx.beginPath(); ctx.arc(b.x + 15, b.y - 10, 6, 0, Math.PI*2); ctx.fill();
-      
-      // Рот
-      ctx.strokeStyle = '#000';
-      ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.arc(b.x, b.y + 10, 15, 0, Math.PI); ctx.stroke();
+      if (b.type === 'FRICH') {
+        ctx.fillStyle = '#ffff00';
+        ctx.beginPath(); ctx.arc(b.x - 15, b.y - 10, 6, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc(b.x + 15, b.y - 10, 6, 0, Math.PI*2); ctx.fill();
+        ctx.strokeStyle = '#000';
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(b.x, b.y + 10, 15, 0, Math.PI); ctx.stroke();
+      } else {
+        // yutiko (крутой пистолет)
+        ctx.fillStyle = '#fff';
+        ctx.beginPath(); ctx.arc(b.x - 10, b.y - 5, 4, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc(b.x + 10, b.y - 5, 4, 0, Math.PI*2); ctx.fill();
+        
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(b.x, b.y);
+        ctx.lineTo(b.x + (state.player.x - b.x) * 0.5, b.y + (state.player.y - b.y) * 0.5);
+        ctx.stroke();
+      }
     }
 
     // Игрок
@@ -1098,7 +1223,6 @@
     ctx.lineWidth = 2;
     ctx.stroke();
 
-    // Визуализация активных баффов (аура)
     if (state.buffs.armor > 0) {
       ctx.strokeStyle = 'rgba(100, 200, 255, 0.5)';
       ctx.lineWidth = 3;
@@ -1131,7 +1255,6 @@
     ctx.lineTo(state.mouse.x, state.mouse.y + 12);
     ctx.stroke();
 
-    // Полоска здоровья игрока
     const barW = 220, barH = 14;
     const bx = 16, by = H - 30;
     ctx.fillStyle = 'rgba(0,0,0,.5)';
