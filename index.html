@@ -160,7 +160,7 @@
   // --- GAME STATE ---
   const state = {
     running: false, over: false,
-    hp: 100, maxHp: 100,
+    hp: 100, maxHp: 100, regen: 0.1, // Добавлен реген
     kills: 0, wave: 1, difficulty: 1,
     waveTimer: 0, spawnTimer: 0,
     itemTimer: 2, medkitTimer: 5, perkTimer: 5,
@@ -181,7 +181,7 @@
     if (document.activeElement) document.activeElement.blur();
 
     state.running = true; state.over = false;
-    state.hp = 100; state.maxHp = 100;
+    state.hp = 100; state.maxHp = 100; state.regen = 0.1;
     state.kills = 0; state.wave = 1; state.difficulty = 1;
     state.waveTimer = 0; state.spawnTimer = 0;
     state.itemTimer = 2; state.medkitTimer = 5; state.perkTimer = 5;
@@ -375,15 +375,27 @@
     if (now - state.lastShot < cd) return;
     state.lastShot = now;
     AudioEngine.playShoot();
+    
     const p = state.player; const dx = state.mouse.x - p.x, dy = state.mouse.y - p.y;
     const len = Math.hypot(dx, dy) || 1; const speed = 720;
-    let dmg = 18; if (state.buffs.damage > 0) dmg *= 2;
-    state.bullets.push({ x: p.x + dx/len * (p.r + 4), y: p.y + dy/len * (p.r + 4), vx: dx/len * speed, vy: dy/len * speed, r: 3, life: 1.2, dmg: dmg });
+    
+    // Урон растет каждые 5 волн (+5)
+    let baseDmg = 18 + Math.floor(state.wave / 5) * 5;
+    if (state.buffs.damage > 0) baseDmg *= 2;
+
+    state.bullets.push({ x: p.x + dx/len * (p.r + 4), y: p.y + dy/len * (p.r + 4), vx: dx/len * speed, vy: dy/len * speed, r: 3, life: 1.2, dmg: baseDmg });
   }
 
   function update(dt) {
     if (!state.running || state.over) return;
     state.t += dt;
+    
+    // Регенерация здоровья
+    if (state.hp < state.maxHp) {
+      state.hp = Math.min(state.maxHp, state.hp + state.regen * dt);
+      syncHud();
+    }
+
     if (state.screenFlash > 0) state.screenFlash -= dt * 2;
     if (state.cameraShake > 0) state.cameraShake -= dt * 3;
     for (let key in state.buffs) { if (state.buffs[key] > 0) state.buffs[key] -= dt; }
@@ -468,7 +480,6 @@
             state.cameraShake = 3; 
             state.kills += 15; 
             
-            // НАГРАДА ЗА БОССА: +ЗДОРОВЬЕ
             if (bossType === 'FRICH') {
               state.maxHp += 50;
               state.hp = state.maxHp;
@@ -503,6 +514,11 @@
       if (state.wave === 10 || state.wave === 20) { spawnBoss(); }
       else if (state.wave % 3 === 0) { spawnMiniBoss(); state.hp = Math.min(state.maxHp, state.hp + 12); }
       else { state.hp = Math.min(state.maxHp, state.hp + 12); }
+      
+      // Каждые 5 волн показываем сообщение об уроне
+      if (state.wave % 5 === 0) {
+        showBossRewardMsg(`УРОН УВЕЛИЧЕН!`);
+      }
       syncHud();
     }
 
@@ -530,7 +546,6 @@
     syncHud();
   }
 
-  // Вспомогательная функция для показа награды за босса
   function showBossRewardMsg(text) {
     ui.levelupMsg.textContent = text;
     ui.levelupMsg.style.color = '#4ade80';
@@ -543,7 +558,7 @@
         ui.levelupMsg.style.color = '#ff5c5c';
         ui.levelupMsg.style.textShadow = '0 0 20px #ff0000';
       }, 500);
-    }, 2500);
+    }, 2000);
   }
 
   function gameOver() {
